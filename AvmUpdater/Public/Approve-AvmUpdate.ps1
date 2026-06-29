@@ -207,9 +207,9 @@ function Approve-AvmUpdate {
                 git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
 
                 $pushOutput = git push origin $branchName 2>&1
-                Write-Verbose $pushOutput
+                Write-Verbose ($pushOutput -join "`n")
                 if ($LASTEXITCODE -ne 0) {
-                    throw "git push failed: $pushOutput"
+                    throw "git push failed: $($pushOutput -join ' ')"
                 }
 
                 $reportBody = if ($absReportPath -and (Test-Path $absReportPath)) { Get-Content $absReportPath -Raw } else { "AVM update plan — see artifacts." }
@@ -251,9 +251,9 @@ function Approve-AvmUpdate {
                 git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
 
                 $pushOutput = git push origin $branchName 2>&1
-                Write-Verbose $pushOutput
+                Write-Verbose ($pushOutput -join "`n")
                 if ($LASTEXITCODE -ne 0) {
-                    throw "git push failed: $pushOutput"
+                    throw "git push failed: $($pushOutput -join ' ')"
                 }
 
                 $reportBody = if ($absReportPath -and (Test-Path $absReportPath)) { Get-Content $absReportPath -Raw } else { "AVM update plan." }
