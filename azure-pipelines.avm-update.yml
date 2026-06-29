@@ -9,6 +9,10 @@ schedules:
   always: true
 
 parameters:
+- name: targetRepository
+  displayName: 'Target repository URL to scan (leave empty to scan this repository)'
+  type: string
+  default: ''
 - name: includeRisk
   displayName: 'Risk tiers to include'
   type: string
@@ -28,6 +32,18 @@ steps:
 - checkout: self
   fetchDepth: 0
   persistCredentials: true
+
+# Clone a different repo when targetRepository is specified.
+# Uses System.AccessToken for same-organisation repos; set a pipeline variable
+# TARGET_REPO_TOKEN (secret) for cross-organisation access.
+- bash: |
+    TOKEN="${TARGET_REPO_TOKEN:-$(System.AccessToken)}"
+    git -c "http.extraHeader=Authorization: Bearer $TOKEN" \
+        clone --depth 0 '${{ parameters.targetRepository }}' ./target-repo
+  displayName: 'Checkout target repository'
+  condition: ne('${{ parameters.targetRepository }}', '')
+  env:
+    TARGET_REPO_TOKEN: $(TARGET_REPO_TOKEN)
 
 - task: UseCustomVersion@1
   displayName: 'Skip — PowerShell 7 pre-installed on ubuntu-latest'
@@ -70,8 +86,10 @@ steps:
     # Convert comma-separated string to array
     $riskTiers = '${{ parameters.includeRisk }}' -split ',' | ForEach-Object { $_.Trim() }
 
+    $scanPath = if ('${{ parameters.targetRepository }}') { './target-repo' } else { '.' }
+
     $params = @{
-      Path            = '.'
+      Path            = $scanPath
       ApprovalMode    = 'azuredevops'
       IncludeRisk     = $riskTiers
       OutputDirectory = '$(Build.ArtifactStagingDirectory)/avm-report'
