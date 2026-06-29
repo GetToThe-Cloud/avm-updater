@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "AvmUpdater default configuration",
+  "autoApproveRiskTiers": ["LOW"],
+  "manualApprovalRiskTiers": ["MEDIUM", "HIGH", "UNKNOWN"],
+  "includePaths": ["**/*.bicep", "**/*.tf"],
+  "excludePaths": [
+    "**/.terraform/**",
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/tests/fixtures/**"
+  ],
+  "registry": {
+    "httpTimeoutSeconds": 30,
+    "maxRetries": 3,
+    "retryDelaySeconds": 2
+  },
+  "report": {
+    "outputDirectory": "./avm-report"
+  },
+  "github": {
+    "branchPrefix": "avm-updates",
+    "splitLowFromHigherRisk": false
+  }
+}

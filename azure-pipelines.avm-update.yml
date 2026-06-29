@@ -1,0 +1,94 @@
+trigger: none # Manual or schedule only
+
+schedules:
+- cron: '0 8 * * 1' # Weekly on Mondays at 08:00 UTC
+  displayName: 'Weekly AVM version check'
+  branches:
+    include:
+    - main
+  always: true
+
+parameters:
+- name: includeRisk
+  displayName: 'Risk tiers to include'
+  type: string
+  default: 'LOW,MEDIUM,HIGH,UNKNOWN'
+- name: dryRun
+  displayName: 'Dry run (no file changes, no PRs)'
+  type: boolean
+  default: false
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  BICEP_VERSION: 'latest'
+
+steps:
+- checkout: self
+  fetchDepth: 0
+  persistCredentials: true
+
+- task: UseCustomVersion@1
+  displayName: 'Skip — PowerShell 7 pre-installed on ubuntu-latest'
+  condition: false
+
+- bash: |
+    pwsh --version || (
+      sudo apt-get update -qq &&
+      sudo apt-get install -y powershell
+    )
+  displayName: 'Ensure PowerShell 7'
+
+- bash: |
+    curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+    chmod +x bicep
+    sudo mv bicep /usr/local/bin/bicep
+    bicep --version
+  displayName: 'Install Bicep CLI'
+
+- task: TerraformInstaller@1
+  displayName: 'Install Terraform'
+  inputs:
+    terraformVersion: 'latest'
+
+- bash: |
+    az version
+    az extension add --name azure-devops --yes 2>/dev/null || true
+  displayName: 'Install azure-devops extension'
+
+- bash: |
+    git config --global user.email "avm-updater[bot]@users.noreply.visualstudio.com"
+    git config --global user.name  "avm-updater[bot]"
+  displayName: 'Configure git identity'
+
+- pwsh: |
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = 'Stop'
+    Import-Module ./AvmUpdater/AvmUpdater.psd1 -Force
+
+    # Convert comma-separated string to array
+    $riskTiers = '${{ parameters.includeRisk }}' -split ',' | ForEach-Object { $_.Trim() }
+
+    $params = @{
+      Path            = '.'
+      ApprovalMode    = 'azuredevops'
+      IncludeRisk     = $riskTiers
+      OutputDirectory = '$(Build.ArtifactStagingDirectory)/avm-report'
+    }
+    if ($true -eq [bool]'${{ parameters.dryRun }}') {
+      $params['DryRun'] = $true
+    }
+
+    Invoke-AvmUpdate @params
+  displayName: 'Run Invoke-AvmUpdate'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish AVM report'
+  condition: always()
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)/avm-report'
+    ArtifactName: 'avm-update-report'
+    publishLocation: 'Container'
