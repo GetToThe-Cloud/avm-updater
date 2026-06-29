@@ -6,8 +6,12 @@ on:
     - cron: '0 8 * * 1'
   workflow_dispatch:
     inputs:
+      target_repository:
+        description: 'Repository to scan (owner/repo).'
+        required: false
+        default: 'GetToThe-Cloud/Website'
       target_ref:
-        description: 'Branch or ref to scan in GetToThe-Cloud/Website. Leave empty for default branch.'
+        description: 'Branch or ref to scan in the target repository. Leave empty for default branch.'
         required: false
         default: ''
       include_risk:
@@ -27,7 +31,7 @@ permissions:
 
 jobs:
   avm-update:
-    name: Check and update AVM modules in GetToThe-Cloud/Website
+    name: Check and update AVM modules in target repository
     runs-on: ubuntu-latest
 
     steps:
@@ -37,13 +41,24 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Resolve the target repository: manual input → repo variable → hardcoded default.
+      # Set AVM_TARGET_REPOSITORY under Settings → Variables → Actions to override the
+      # default for all runs without changing the workflow file.
+      - name: Resolve target repository
+        id: target
+        run: |
+          REPO="${{ github.event.inputs.target_repository }}"
+          REPO="${REPO:-${{ vars.AVM_TARGET_REPOSITORY }}}"
+          REPO="${REPO:-GetToThe-Cloud/Website}"
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+
       # Checkout the target repo.
       # GH_PAT must have Contents: Read & Write and Pull requests: Read & Write
-      # on GetToThe-Cloud/Website.
-      - name: Checkout GetToThe-Cloud/Website
+      # on the target repository.
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
-          repository: GetToThe-Cloud/Website
+          repository: ${{ steps.target.outputs.repo }}
           ref: ${{ github.event.inputs.target_ref }}
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
