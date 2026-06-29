@@ -1,0 +1,110 @@
+name: AVM Module Version Check
+
+on:
+  schedule:
+    # Weekly on Mondays at 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      include_risk:
+        description: 'Risk tiers to include (comma-separated: LOW,MEDIUM,HIGH,UNKNOWN)'
+        required: false
+        default: 'LOW,MEDIUM,HIGH,UNKNOWN'
+      dry_run:
+        description: 'Dry run (no file changes, no PRs)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  avm-update:
+    name: Check and update AVM module versions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install PowerShell 7
+        uses: actions/setup-python@v5   # used to install pwsh on ubuntu
+        continue-on-error: true
+
+      - name: Ensure PowerShell 7 is available
+        run: |
+          if ! command -v pwsh &> /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y powershell
+          fi
+          pwsh --version
+
+      - name: Install Bicep CLI
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep
+          sudo mv bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1"
+
+      - name: Install gh CLI
+        run: |
+          type gh &>/dev/null || (
+            sudo apt-get update -qq &&
+            sudo apt-get install -y gh
+          )
+          gh --version
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "avm-updater[bot]@users.noreply.github.com"
+          git config --global user.name  "avm-updater[bot]"
+
+      - name: Build IncludeRisk array
+        id: risk
+        run: |
+          RAW="${{ github.event.inputs.include_risk || 'LOW,MEDIUM,HIGH,UNKNOWN' }}"
+          # Convert comma-separated to PowerShell array literal
+          PS_ARRAY=$(echo "$RAW" | sed "s/,/','/g" | sed "s/^/'/" | sed "s/$/'/")
+          echo "ps_array=@($PS_ARRAY)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Invoke-AvmUpdate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pwsh -NoProfile -Command "
+            Set-StrictMode -Version Latest
+            \$ErrorActionPreference = 'Stop'
+            Import-Module ./AvmUpdater/AvmUpdater.psd1 -Force
+
+            \$params = @{
+              Path         = '.'
+              ApprovalMode = 'github'
+              IncludeRisk  = ${{ steps.risk.outputs.ps_array }}
+              OutputDirectory = './avm-report'
+            }
+            if ('${{ github.event.inputs.dry_run }}' -eq 'true') {
+              \$params['DryRun'] = \$true
+            }
+
+            Invoke-AvmUpdate @params
+          "
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avm-update-report
+          path: |
+            avm-report/avm-update-report.md
+            avm-report/avm-update-plan.json
+          if-no-files-found: ignore
+          retention-days: 30
