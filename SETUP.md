@@ -1,4 +1,4 @@
-# AvmUpdater — CI/CD Setup Guide
+# AvmUpdater — CI/CD Setup Guide (v1.0.0)
 
 This guide covers everything required to run **AvmUpdater** automatically in **GitHub Actions** and **Azure DevOps Pipelines**.
 
@@ -19,7 +19,8 @@ This guide covers everything required to run **AvmUpdater** automatically in **G
    - [Service connection permissions](#service-connection-permissions)
    - [Create the pipeline](#create-the-pipeline)
    - [Manual trigger](#manual-trigger-azure-devops)
-4. [Approval flow](#approval-flow)
+4. [Scanning a different repository](#scanning-a-different-repository)
+5. [Approval flow](#approval-flow)
 5. [Configuration reference](#configuration-reference)
 6. [Troubleshooting](#troubleshooting)
 
@@ -75,8 +76,9 @@ your-infra-repo/
 
 | Secret | Where to set | Description |
 |--------|-------------|-------------|
-| `GITHUB_TOKEN` | Automatic | Built-in. Already has `contents: write` and `pull-requests: write` if the workflow sets those permissions (it does). No action needed. |
-| `GITHUB_TOKEN` with fine-grained PAT *(optional)* | `Settings → Secrets → Actions` | Only needed if your repository has branch protection rules that block the built-in token from pushing branches or creating PRs. Create a **fine-grained PAT** with `Contents: Read & Write` and `Pull requests: Read & Write`, then store it as `AVM_UPDATER_PAT`. Update the workflow `env:` block accordingly. |
+| `GITHUB_TOKEN` | Automatic | Built-in. Already has `contents: write` and `pull-requests: write` if the workflow sets those permissions (it does). No action needed for same-repo scanning. |
+| `GH_PAT` *(required for cross-repo)* | `Settings → Secrets → Actions` | A **fine-grained PAT** with `Contents: Read & Write` and `Pull requests: Read & Write` on the **target** repository. Required when `target_repository` points to a repo other than the one the workflow runs in. |
+| `GH_PAT` *(optional, branch protection)* | `Settings → Secrets → Actions` | Also use `GH_PAT` if your repository has branch protection rules that block the built-in token from pushing branches or creating PRs. |
 
 **Set the built-in token permissions (required):**
 
@@ -118,6 +120,8 @@ The workflow runs on a **weekly schedule (Mondays 08:00 UTC)** and can be trigge
 1. Go to **Actions → AVM Module Version Check**
 2. Click **Run workflow**
 3. Optionally set:
+   - **Repository to scan** (`target_repository`) — `owner/repo` of the repository to scan. Leave empty to scan this repository.
+   - **Branch or ref to scan** (`target_ref`) — branch or tag in the target repository. Leave empty for the default branch.
    - **Risk tiers to include** (default: `LOW,MEDIUM,HIGH,UNKNOWN`)
    - **Dry run** — scans and generates report without opening a PR
 
@@ -145,7 +149,8 @@ your-infra-repo/
 
 | Variable | Type | Where to set | Description |
 |----------|------|-------------|-------------|
-| `System.AccessToken` | Built-in | Automatic | Used by the pipeline to authenticate git push and PR creation. Must be explicitly enabled (see below). |
+| `System.AccessToken` | Built-in | Automatic | Used by the pipeline to authenticate git push and PR creation for same-organisation repos. Must be explicitly enabled (see below). |
+| `TARGET_REPO_TOKEN` | Secret variable | **Edit pipeline → Variables** | A PAT with **Code (Read & Write)** and **Pull Request (Read & Write)** scopes. Required when `targetRepository` points to a repository in a **different organisation**. |
 
 **Enable `System.AccessToken`:**
 
@@ -197,8 +202,44 @@ The pipeline agent pushes a branch and creates a PR using the **Project Collecti
 1. Go to **Pipelines → avm-update** (or your chosen name)
 2. Click **Run pipeline**
 3. Optionally set parameters:
+   - **Target repository URL to scan** (`targetRepository`) — full clone URL of the repository to scan (e.g. `https://dev.azure.com/org/project/_git/repo`). Leave empty to scan this repository.
    - **Risk tiers to include** (default: `LOW,MEDIUM,HIGH,UNKNOWN`)
    - **Dry run** — no file changes, no PRs
+
+---
+
+## Scanning a different repository
+
+Both pipelines support scanning an **external repository** — useful when the AvmUpdater pipeline lives in a central/dedicated repo and scans one or more IaC repos.
+
+### How it works
+
+1. The pipeline first checks out the `avm-updater` repo (to get the PowerShell module).
+2. It then clones the target repository into `./target-repo/`.
+3. `Invoke-AvmUpdate` scans `./target-repo/` instead of `.`.
+4. The generated PR (in `github` / `azuredevops` approval mode) is opened against the **target repository**.
+
+### GitHub Actions
+
+Set `target_repository` to `owner/repo` when triggering manually:
+
+```
+Repository to scan: buzzict/azure-landingzone
+Branch or ref to scan: main   (leave empty for default branch)
+```
+
+Store a PAT as `GH_PAT` with **Contents: Read & Write** and **Pull requests: Read & Write** on the target repo. The workflow automatically prefers `GH_PAT` over `GITHUB_TOKEN`.
+
+### Azure DevOps
+
+Set `targetRepository` to the full clone URL:
+
+```
+https://dev.azure.com/myorg/myproject/_git/azure-landingzone
+```
+
+- **Same organisation**: `System.AccessToken` is used automatically — no extra secrets needed.
+- **Different organisation**: Create a pipeline secret variable `TARGET_REPO_TOKEN` containing a PAT with **Code (Read & Write)** and **Pull Request (Read & Write)** on the target repo.
 
 ---
 
