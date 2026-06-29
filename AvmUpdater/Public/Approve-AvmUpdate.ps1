@@ -195,13 +195,13 @@ function Approve-AvmUpdate {
                 (Resolve-Path $ReportPath -ErrorAction SilentlyContinue)?.Path ?? $ReportPath
             } else { $null }
 
+            # Apply file updates now (file paths are absolute — works from any directory)
+            $updateResult = Update-AvmModuleVersion -ApprovedPlan ([PSCustomObject]@{ approvedItems = $approved.ToArray() })
+
             Push-Location $WorkingDirectory
             try {
                 Write-Verbose "Creating branch: $branchName"
                 git checkout -b $branchName 2>&1 | Write-Verbose
-
-                # Apply updates
-                $updateResult = Update-AvmModuleVersion -ApprovedPlan ([PSCustomObject]@{ approvedItems = $approved.ToArray() })
 
                 git add -A 2>&1 | Write-Verbose
                 git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
@@ -213,11 +213,15 @@ function Approve-AvmUpdate {
                 }
 
                 $reportBody = if ($absReportPath -and (Test-Path $absReportPath)) { Get-Content $absReportPath -Raw } else { "AVM update plan — see artifacts." }
-                $highestRisk = if ($approved | Where-Object riskTier -eq 'HIGH') { 'high' } elseif ($approved | Where-Object riskTier -eq 'MEDIUM') { 'medium' } else { 'low' }
 
-                # Try gh CLI first, fall back to REST
+                # Create PR — labels are intentionally omitted to avoid failures on repos
+                # that do not have the label pre-created.
                 if (Get-Command gh -ErrorAction SilentlyContinue) {
-                    $prUrl = gh pr create --title "chore(avm): update AVM module versions" --body $reportBody --label "avm-update" --label "risk:$highestRisk" 2>&1
+                    $prUrl = gh pr create --title "chore(avm): update AVM module versions" --body $reportBody 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Warning "gh pr create failed: $($prUrl -join ' ')"
+                        $prUrl = $null
+                    }
                 } else {
                     Write-Warning "gh CLI not found; PR creation skipped. Push to '$branchName' succeeded."
                 }
