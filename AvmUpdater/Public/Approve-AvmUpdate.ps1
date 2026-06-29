@@ -51,7 +51,10 @@ function Approve-AvmUpdate {
         [string]$ApprovalMode = 'local',
 
         [Parameter()]
-        [switch]$DryRun
+        [switch]$DryRun,
+
+        [Parameter()]
+        [string]$WorkingDirectory = '.'
     )
 
     $cfg              = Get-AvmConfig
@@ -187,24 +190,39 @@ function Approve-AvmUpdate {
             # All candidates go in — PR merge is the approval gate
             foreach ($item in $manualItems) { $approved.Add($item) }
 
-            Write-Verbose "Creating branch: $branchName"
-            git checkout -b $branchName 2>&1 | Write-Verbose
+            # Resolve report path to absolute before changing directory
+            $absReportPath = if ($ReportPath) {
+                (Resolve-Path $ReportPath -ErrorAction SilentlyContinue)?.Path ?? $ReportPath
+            } else { $null }
 
-            # Apply updates
-            $updateResult = Update-AvmModuleVersion -ApprovedPlan ([PSCustomObject]@{ approvedItems = $approved.ToArray() })
+            Push-Location $WorkingDirectory
+            try {
+                Write-Verbose "Creating branch: $branchName"
+                git checkout -b $branchName 2>&1 | Write-Verbose
 
-            git add -A 2>&1 | Write-Verbose
-            git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
-            git push origin $branchName 2>&1 | Write-Verbose
+                # Apply updates
+                $updateResult = Update-AvmModuleVersion -ApprovedPlan ([PSCustomObject]@{ approvedItems = $approved.ToArray() })
 
-            $reportBody = if ($ReportPath -and (Test-Path $ReportPath)) { Get-Content $ReportPath -Raw } else { "AVM update plan — see artifacts." }
-            $highestRisk = if ($approved | Where-Object riskTier -eq 'HIGH') { 'high' } elseif ($approved | Where-Object riskTier -eq 'MEDIUM') { 'medium' } else { 'low' }
+                git add -A 2>&1 | Write-Verbose
+                git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
 
-            # Try gh CLI first, fall back to REST
-            if (Get-Command gh -ErrorAction SilentlyContinue) {
-                $prUrl = gh pr create --title "chore(avm): update AVM module versions" --body $reportBody --label "avm-update" --label "risk:$highestRisk" 2>&1
-            } else {
-                Write-Warning "gh CLI not found; PR creation skipped. Push to '$branchName' succeeded."
+                $pushOutput = git push origin $branchName 2>&1
+                Write-Verbose $pushOutput
+                if ($LASTEXITCODE -ne 0) {
+                    throw "git push failed: $pushOutput"
+                }
+
+                $reportBody = if ($absReportPath -and (Test-Path $absReportPath)) { Get-Content $absReportPath -Raw } else { "AVM update plan — see artifacts." }
+                $highestRisk = if ($approved | Where-Object riskTier -eq 'HIGH') { 'high' } elseif ($approved | Where-Object riskTier -eq 'MEDIUM') { 'medium' } else { 'low' }
+
+                # Try gh CLI first, fall back to REST
+                if (Get-Command gh -ErrorAction SilentlyContinue) {
+                    $prUrl = gh pr create --title "chore(avm): update AVM module versions" --body $reportBody --label "avm-update" --label "risk:$highestRisk" 2>&1
+                } else {
+                    Write-Warning "gh CLI not found; PR creation skipped. Push to '$branchName' succeeded."
+                }
+            } finally {
+                Pop-Location
             }
         }
 
@@ -221,21 +239,34 @@ function Approve-AvmUpdate {
 
             foreach ($item in $manualItems) { $approved.Add($item) }
 
-            git checkout -b $branchName 2>&1 | Write-Verbose
-            $null = Update-AvmModuleVersion -ApprovedPlan ([PSCustomObject]@{ approvedItems = $approved.ToArray() })
-            git add -A 2>&1 | Write-Verbose
-            git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
-            git push origin $branchName 2>&1 | Write-Verbose
+            $absReportPath = if ($ReportPath) {
+                (Resolve-Path $ReportPath -ErrorAction SilentlyContinue)?.Path ?? $ReportPath
+            } else { $null }
 
-            $reportBody = if ($ReportPath -and (Test-Path $ReportPath)) { Get-Content $ReportPath -Raw } else { "AVM update plan." }
+            Push-Location $WorkingDirectory
+            try {
+                git checkout -b $branchName 2>&1 | Write-Verbose
+                $null = Update-AvmModuleVersion -ApprovedPlan ([PSCustomObject]@{ approvedItems = $approved.ToArray() })
+                git add -A 2>&1 | Write-Verbose
+                git commit -m "chore(avm): update AVM module versions [$(Get-Date -Format 'yyyy-MM-dd')]" 2>&1 | Write-Verbose
 
-            if (Get-Command az -ErrorAction SilentlyContinue) {
-                $env:AZURE_DEVOPS_EXT_PAT = $token
-                $prUrl = az repos pr create --title "chore(avm): update AVM module versions" --description $reportBody --source-branch $branchName 2>&1
-            } else {
-                Write-Warning "az CLI not found; PR creation skipped."
+                $pushOutput = git push origin $branchName 2>&1
+                Write-Verbose $pushOutput
+                if ($LASTEXITCODE -ne 0) {
+                    throw "git push failed: $pushOutput"
+                }
+
+                $reportBody = if ($absReportPath -and (Test-Path $absReportPath)) { Get-Content $absReportPath -Raw } else { "AVM update plan." }
+
+                if (Get-Command az -ErrorAction SilentlyContinue) {
+                    $env:AZURE_DEVOPS_EXT_PAT = $token
+                    $prUrl = az repos pr create --title "chore(avm): update AVM module versions" --description $reportBody --source-branch $branchName 2>&1
+                } else {
+                    Write-Warning "az CLI not found; PR creation skipped."
+                }
+            } finally {
+                Pop-Location
             }
-        }
     }
 
     $auditRecord.approvedItems = $approved.ToArray()

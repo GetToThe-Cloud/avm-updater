@@ -112,7 +112,7 @@ function Invoke-AvmUpdate {
 
     # Step 5: Approval gate
     Write-Host "Step 3/5: Running approval gate ($ApprovalMode)..." -ForegroundColor White
-    $approvalResult = Approve-AvmUpdate -Plan $filteredPlan -ReportPath $reportResult.reportPath -ApprovalMode $ApprovalMode -DryRun:$DryRun
+    $approvalResult = Approve-AvmUpdate -Plan $filteredPlan -ReportPath $reportResult.reportPath -ApprovalMode $ApprovalMode -WorkingDirectory $Path -DryRun:$DryRun
 
     # Step 6: Apply updates (local mode only — github/azuredevops already applied inside approval)
     $updateResult = $null
