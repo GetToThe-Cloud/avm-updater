@@ -267,6 +267,7 @@ function Approve-AvmUpdate {
             } finally {
                 Pop-Location
             }
+        }
     }
 
     $auditRecord.approvedItems = $approved.ToArray()
